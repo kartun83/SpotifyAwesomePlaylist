@@ -47,6 +47,8 @@ function genTrainingPlaylist(
   // Internal settings
   let referenceTracksFilename = 'ReferenceTracks';
   let noLikesFilename         = 'NoLikeTracks';
+  let backupFilename          = 'Backup';
+  let unexpectedBonusFilename = 'UnexpectedBonus';
   let amountForCraft          = 4;          // Spotify limit eq 5, not recommended for changing
 
   // Internal var
@@ -57,6 +59,8 @@ function genTrainingPlaylist(
   // Generate filenames for cache
   referenceTracksFilename = referenceTracksFilename.concat('_', Utils.generateDigest(playlistName), '.json');
   noLikesFilename = noLikesFilename.concat('_', Utils.generateDigest(playlistName), '.json');
+  backupFilename = backupFilename.concat('_', Utils.generateDigest(playlistName), '.json');
+  unexpectedBonusFilename = backupFilename.concat('_', Utils.generateDigest(playlistName), '.json');
 
   // Исходный трек
   // https://developer.spotify.com/console/get-audio-features-track/
@@ -91,6 +95,20 @@ function genTrainingPlaylist(
   //let tracks = Source.getPlaylistTracks('', 'id', '', 10, false);
 
   let existingPlaylist = Source.getPlaylistTracks(playlistName);
+
+  // 3.2 - compare backup playlist with actual one.
+  let playlistBackup = Cache.read(backupFilename);
+  let unexpectedBonus = [];
+  if (playlistBackup.length > 0)
+  {
+    let playlistDelta = Filter.removeTracks(playlistBackup, existingPlaylist, false, 'every');  
+    unexpectedBonus = Library.checkFavoriteTracks(playlistDelta);
+    // Save unexpected bonus separately. Would be used to calc stats or generation of other playlists, and for filtering, possibly
+    let unexpectedBonus_likes = unexpectedBonus.filter(t => t.isFavorite);
+    Cache.append(unexpectedBonus_likes);
+    unexpectedBonus = Cache.read(unexpectedBonusFilename);  
+  }
+  // --- End 3.2
 
   // Listening history
   let recentTracks = RecentTracks.get();
@@ -228,14 +246,18 @@ function genTrainingPlaylist(
 
   // 3 - создаем плейлист
   let hitRatio = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length) * 100).toFixed(2);
+  let unexpBonus = (unexpectedBonus.length / NoLikeTracks.length * 100).toFixed(2);
   Playlist.saveWithReplace({
       // id: 'вашеId',
       name: playlistName,
       tracks: tracks,
       public: makePublic,
       randomCover: 'once',
-      description: 'Stats: Likes from all time:' + LikeTracks.length + '. ' + 'No likes: ' + NoLikeTracks.length + '. Hitratio: '+ hitRatio + '%.',
+      description: 'Stats: Likes from all time:' + LikeTracks.length + '. ' + 'No likes: ' + NoLikeTracks.length + '. Hitratio: '+ hitRatio + '%. Unxepected bonus: '+unexpBonus + '%',
   });
+
+  // 3.1 - backup playlist, would be required for further algorithm tweaking  
+  Cache.write(backupFilename, tracks);
 
   console.log('Число запросов %d', CustomUrlFetchApp.getCountRequest());
 }
