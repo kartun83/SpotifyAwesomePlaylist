@@ -1,4 +1,4 @@
-const kartun_gen_version = "1.0";
+const kartun_gen_version = "1.0.2";
 const email              = "alexey.tveritinov@gmail.com"
 
 function genTrainingPlaylist(
@@ -7,8 +7,9 @@ function genTrainingPlaylist(
   limitFinalPlaylistLength = true,
   finalPlaylistLength      = 50,
   needBlender              = true,
+  strictBlender            = true,   
   secondChance             = true,
-  secondChancePerc         = 0.25,  
+  secondChancePerc         = 0.25, 
   makePublic               = true,  
   minTempo                 = 145,
   minDanceability          = 0.47,
@@ -54,8 +55,8 @@ function genTrainingPlaylist(
   let r2                   = '';
 
   // Generate filenames for cache
-  referenceTracksFilename = referenceTracksFilename.concat('_', generateDigest(playlistName), '.json');
-  noLikesFilename = noLikesFilename.concat('_', generateDigest(playlistName), '.json');
+  referenceTracksFilename = referenceTracksFilename.concat('_', Utils.generateDigest(playlistName), '.json');
+  noLikesFilename = noLikesFilename.concat('_', Utils.generateDigest(playlistName), '.json');
 
   // Исходный трек
   // https://developer.spotify.com/console/get-audio-features-track/
@@ -108,11 +109,6 @@ function genTrainingPlaylist(
     console.log("Adding %d tracks to reference list", referenceTracks.length);
     referenceTracks = Selector.sliceFirst(referenceTracks, 4); // There is limit to 5 items :)
 
-    // Save nolikes to storage
-    existingPlaylist_nolikes = existingPlaylist.filter(t => !t.isFavorite);
-    Cache.append(noLikesFilename, existingPlaylist_nolikes, 'end', maxNoLikesCache);
-    console.log("Adding %d tracks to no likes list", existingPlaylist_nolikes.length);
-
     // Leave only those from playlist
     Filter.removeTracks(originalPlaylist, recentTracks, false, 'every');
     console.log("Unheared tracks from previous playlist %d", originalPlaylist.length);
@@ -121,10 +117,17 @@ function genTrainingPlaylist(
     {
       secondChancePlaylist =  Selector.sliceRandom(originalPlaylist, originalPlaylist.length * secondChancePerc);
     }
+
+    // Save nolikes to storage
+    existingPlaylist_nolikes = existingPlaylist.filter(t => !t.isFavorite);
+    // Cache only those were listened, but not liked. If it's not listened, it can't be liked :)
+    Filter.removeTracks(existingPlaylist_nolikes, originalPlaylist, false, 'every');
+    Cache.append(noLikesFilename, existingPlaylist_nolikes, 'end', maxNoLikesCache);
+    console.log("Adding %d tracks to no likes list", existingPlaylist_nolikes.length);
   }
   else{
     // If playlist does not exist delete cache, as it's not valid
-    cleanUp(referenceTracksFilename, noLikesFilename);
+    Utils.cleanUp(referenceTracksFilename, noLikesFilename);
     firstRun = true;
   }
 
@@ -183,14 +186,12 @@ function genTrainingPlaylist(
     tracks = Combiner.alternate('max', tracks, secondChancePlaylist ); 
   }    
 
-  // Check liked tracks in this playlist
-    // Library.checkFavoriteTracks(tracks);
-    // existingPlaylist_nolikes = tracks.filter(t => !t.isFavorite);
 
+    let LikeTracks = Cache.read(referenceTracksFilename);
     if (needBlender == true){
       // TODO :: Refactor to function
       // Load reference tracks cache
-      let LikeTracks = Cache.read(referenceTracksFilename);
+      
       Filter.dedupTracks(LikeTracks);
       referenceTracks = Selector.sliceRandom(LikeTracks, amountForCraft);
       let tracks2 = Source.craftTracks(referenceTracks,
@@ -212,33 +213,28 @@ function genTrainingPlaylist(
       // Remove liked tracks from generated list
       let currPlaylist_likes = tracks2.filter(t => t.isFavorite);
       Filter.removeTracks(tracks2, currPlaylist_likes, false, 'every');  
+      if (strictBlender == true)
+      {
+        Filter.dedupArtists(tracks2);
+      }
       // Combine both arrays
       tracks = Combiner.alternate('max', tracks, tracks2 );       
     }
 
-// let savedTracks = Source.getSavedTracks();
-// Selector.keepRandom(savedTracks, 3);
-
-// let artistIds = savedTracks.map(track => track.artists[0].id);
-
-// let tracks = Source.getRecomTracks({
-//     seed_artists: artistIds.join(',')
-//     //seed_genres: 'drum-and-bass, dubstep, post-dubstep'
-// });
-  
   Filter.dedupTracks(tracks);
   if (limitFinalPlaylistLength) {
     Selector.keepRandom(tracks, finalPlaylistLength);
   }
 
   // 3 - создаем плейлист
+  let hitRatio = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length) * 100).toFixed(2);
   Playlist.saveWithReplace({
       // id: 'вашеId',
       name: playlistName,
       tracks: tracks,
       public: makePublic,
       randomCover: 'once',
-      //description: 'Нашли новых артистов: ' + SimArtist3.length + '. ' + 'Ранее понравилось артистов: ' + LikeBack.length,
+      description: 'Stats: Likes from all time:' + LikeTracks.length + '. ' + 'No likes: ' + NoLikeTracks.length + '. Hitratio: '+ hitRatio + '%.',
   });
 
   console.log('Число запросов %d', CustomUrlFetchApp.getCountRequest());
@@ -254,6 +250,7 @@ function genTrancePlaylist(){
                       limitFinalPlaylistLength = true,
                       finalPlaylistLength      = 50,
                       needBlender              = true,
+                      strictBlender            = true,
                       secondChance             = true,
                       secondChancePerc         = 0.25,
                       makePublic               = true,
@@ -277,6 +274,7 @@ function genDNBPlaylist(){
                       limitFinalPlaylistLength = true,
                       finalPlaylistLength      = 50,
                       needBlender              = true,
+                      strictBlender            = true,
                       secondChance             = true,
                       secondChancePerc         = 0.25,
                       makePublic               = true,
@@ -290,17 +288,22 @@ function genDNBPlaylist(){
                      );
 }
 
-function generateDigest(playlistFilename){
-  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, playlistFilename)
-  .map(function(b) {return ("0" + (b < 0 && b + 256 || b).toString(16)).substr(-2)})
-  .join("");
-  Logger.log(digest);
-  return digest;
-}
+// function generateDigest_(playlistFilename){
+//   var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, playlistFilename)
+//   .map(function(b) {return ("0" + (b < 0 && b + 256 || b).toString(16)).substr(-2)})
+//   .join("");
+//   Logger.log(digest);
+//   return digest;
+// }
 
-function cleanUp(referenceFile, noLikesFile){
-  Cache.remove(referenceFile);
-  console.log("Deleting %s", referenceFile);
-  Cache.remove(noLikesFile);
-  console.log("Deleting %s", noLikesFile);
+// function cleanUp_(referenceFile, noLikesFile){
+//   Cache.remove(referenceFile);
+//   console.log("Deleting %s", referenceFile);
+//   Cache.remove(noLikesFile);
+//   console.log("Deleting %s", noLikesFile);
+// }
+
+function testGenStats(){
+  Utils.generateStatistics( [{id:'2BkPRWKJiCHk1pcJBTDpvt'}, 
+                             {id:'1A5qWui6qJvEdlJ3ZYO8yS'}] );                             
 }
