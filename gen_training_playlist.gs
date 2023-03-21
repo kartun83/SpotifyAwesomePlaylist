@@ -245,7 +245,7 @@ function genTrainingPlaylist(
   }
 
   // 3 - создаем плейлист
-  let hitRatio = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length) * 100).toFixed(2);
+  let hitRatio = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length + unexpectedBonus.length ) * 100).toFixed(2);
   let unexpBonus = (unexpectedBonus.length / NoLikeTracks.length * 100).toFixed(2);
   Playlist.saveWithReplace({
       // id: 'вашеId',
