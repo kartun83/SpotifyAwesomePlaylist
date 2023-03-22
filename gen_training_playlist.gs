@@ -114,11 +114,11 @@ function genTrainingPlaylist(
           //let unexpectedBonus_likes = unexpectedBonus.filter(t => t.isFavorite);
           //Cache.append(unexpectedBonus_likes);
           //unexpectedBonus = Cache.read(unexpectedBonusFilename); 
-          let {unexpectedBonus_likes, hardMissTracks } = Filter.separateByCriteria(existingPlaylist, {byLikes: true, listened: true});
+          let {unexpectedBonus_likes, hardMissTracks } = Filter.separateByCriteria(playlistDelta  , {byLikes: true, listened: true});
           Cache.append(unexpectedBonusFilename, unexpectedBonus_likes);
-          console.log("Adding unexpected bonus: %d", unexpectedBonus_likes.length);
+          console.log("Adding unexpected bonus: %d", unexpectedBonus_likes.length, 'end' );
           // Треки без лайков, которые удалены из плейлиста. То есть совсем плохие. Их надо будет фильтровать и никогда больше сюда не подкладывать
-          Cache.append(hardMissFilename, hardMissTracks);
+          Cache.append(hardMissFilename, hardMissTracks, 'end' );
           console.log("Adding hard miss tracks: %d", hardMissTracks.length);
 
           unexpectedBonus = Cache.read(unexpectedBonusFilename); 
@@ -183,19 +183,21 @@ function genTrainingPlaylist(
   // });
       
 
-    if (firstRun == true)
-    {
-      // TODO :: Finish
-      // referenceTracks.forEach((elem, i) => {
-      //   obj[`id`] = elem}
-      // )
+    // if (firstRun == true)
+    // {
+    //   // TODO :: Finish
+    //   // referenceTracks.forEach((elem, i) => {
+    //   //   obj[`id`] = elem}
+    //   // )
 
-        var {min, max, median2} =  Utils.generateStatistics( referenceTracks );                             
-    }
-    else
-    {
-        var {min, max, median2} =  Utils.generateStatistics( referenceTracks ); 
-    }
+    //     var {min, max, median2} =  Utils.generateStatistics( referenceTracks );                             
+    // }
+    // else
+    // {
+    //     var {min, max, median2} =  Utils.generateStatistics( referenceTracks ); 
+    // }
+
+      var {min, max, median2} =  Utils.generateStatistics( referenceTracks ); 
 
       tracks = Source.craftTracks(referenceTracks,
         {
