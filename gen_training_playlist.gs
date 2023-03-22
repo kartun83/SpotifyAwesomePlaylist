@@ -11,9 +11,9 @@ function genTrainingPlaylist(
   secondChance             = true,
   secondChancePerc         = 0.25, 
   makePublic               = true,  
-  minTempo                 = 145,
-  minDanceability          = 0.47,
-  minEnergy                = 0.6,
+  //minTempo                 = 145,
+  //minDanceability          = 0.47,
+  //minEnergy                = 0.6,
   maxSpeechness            = 0.3,   // Currenty not used
   minValence               = 0.25,  // Currenty not used
   // Do not change unless absolutly reqiured
@@ -49,18 +49,22 @@ function genTrainingPlaylist(
   let noLikesFilename         = 'NoLikeTracks';
   let backupFilename          = 'Backup';
   let unexpectedBonusFilename = 'UnexpectedBonus';
+  let hardMissFilename        = 'HardMiss';
   let amountForCraft          = 4;          // Spotify limit eq 5, not recommended for changing
 
   // Internal var
   let secondChancePlaylist = [];
   let firstRun             = false;
   let r2                   = '';
+  let unexpectedBonus      = [];
+  let hardMissTracks       = [];
 
   // Generate filenames for cache
   referenceTracksFilename = referenceTracksFilename.concat('_', Utils.generateDigest(playlistName), '.json');
   noLikesFilename = noLikesFilename.concat('_', Utils.generateDigest(playlistName), '.json');
   backupFilename = backupFilename.concat('_', Utils.generateDigest(playlistName), '.json');
   unexpectedBonusFilename = backupFilename.concat('_', Utils.generateDigest(playlistName), '.json');
+  hardMissFilename = backupFilename.concat('_', Utils.generateDigest(playlistName), '.json');
 
   // Исходный трек
   // https://developer.spotify.com/console/get-audio-features-track/
@@ -95,26 +99,42 @@ function genTrainingPlaylist(
   //let tracks = Source.getPlaylistTracks('', 'id', '', 10, false);
 
   let existingPlaylist = Source.getPlaylistTracks(playlistName);
-
-  // 3.2 - compare backup playlist with actual one.
-  let playlistBackup = Cache.read(backupFilename);
-  let unexpectedBonus = [];
-  if (playlistBackup.length > 0)
-  {
-    let playlistDelta = Filter.removeTracks(playlistBackup, existingPlaylist, false, 'every');  
-    unexpectedBonus = Library.checkFavoriteTracks(playlistDelta);
-    // Save unexpected bonus separately. Would be used to calc stats or generation of other playlists, and for filtering, possibly
-    let unexpectedBonus_likes = unexpectedBonus.filter(t => t.isFavorite);
-    Cache.append(unexpectedBonus_likes);
-    unexpectedBonus = Cache.read(unexpectedBonusFilename);  
-  }
-  // --- End 3.2
-
-  // Listening history
-  let recentTracks = RecentTracks.get();
-
   // If there are something in existing playlist, take up to 5 liked tracks for reference
   if ( existingPlaylist.length > 0) {
+    // 3.2 - compare backup playlist with actual one.
+    let playlistBackup = Cache.read(backupFilename);
+    
+    if (playlistBackup.length > 0)
+    {
+      let playlistDelta = Filter.removeTracks(playlistBackup, existingPlaylist, false, 'every');  
+        try
+        {
+           //unexpectedBonus = Library.checkFavoriteTracks(playlistDelta);
+        // Save unexpected bonus separately. Would be used to calc stats or generation of other playlists, and for filtering, possibly
+          //let unexpectedBonus_likes = unexpectedBonus.filter(t => t.isFavorite);
+          //Cache.append(unexpectedBonus_likes);
+          //unexpectedBonus = Cache.read(unexpectedBonusFilename); 
+          let {unexpectedBonus_likes, hardMissTracks } = Filter.separateByCriteria(existingPlaylist, {byLikes: true, listened: true});
+          Cache.append(unexpectedBonusFilename, unexpectedBonus_likes);
+          console.log("Adding unexpected bonus: %d", unexpectedBonus_likes.length);
+          // Треки без лайков, которые удалены из плейлиста. То есть совсем плохие. Их надо будет фильтровать и никогда больше сюда не подкладывать
+          Cache.append(hardMissFilename, hardMissTracks);
+          console.log("Adding hard miss tracks: %d", hardMissTracks.length);
+
+          unexpectedBonus = Cache.read(unexpectedBonusFilename); 
+          hardMissTracks  = Cache.read(hardMissFilename);
+        }
+        catch (err)
+        {
+          // косяки с удалением рудиментов после удаления плейлистов. Так вообще не должно быть.
+        }
+    }
+    // --- End 3.2
+
+    // Listening history
+    let recentTracks = RecentTracks.get();
+
+    
     // Split source into liked and not liked parts
     Library.checkFavoriteTracks(existingPlaylist);
     // Backup original playlist, as it would be changed
@@ -133,7 +153,7 @@ function genTrainingPlaylist(
 
     if (secondChance == true)
     {
-      secondChancePlaylist =  Selector.sliceRandom(originalPlaylist, originalPlaylist.length * secondChancePerc);
+      secondChancePlaylist =  Selector.sliceRandom(originalPlaylist, Math.round(originalPlaylist.length * secondChancePerc));
     }
 
     // Save nolikes to storage
@@ -142,10 +162,11 @@ function genTrainingPlaylist(
     Filter.removeTracks(existingPlaylist_nolikes, originalPlaylist, false, 'every');
     Cache.append(noLikesFilename, existingPlaylist_nolikes, 'end', maxNoLikesCache);
     console.log("Adding %d tracks to no likes list", existingPlaylist_nolikes.length);
+    referenceTracks = Selector.sliceRandom(referenceTracks, amountForCraft);
   }
   else{
     // If playlist does not exist delete cache, as it's not valid
-    Utils.cleanUp(referenceTracksFilename, noLikesFilename);
+    Utils.cleanUp(referenceTracksFilename, noLikesFilename, backupFilename, unexpectedBonusFilename, hardMissFilename);
     firstRun = true;
   }
 
@@ -160,12 +181,7 @@ function genTrainingPlaylist(
   //     //max_liveness: maxLiveness,
   //     //mode: modality
   // });
-      referenceTracks = Selector.sliceRandom(referenceTracks, amountForCraft);
-  //  https://developer.spotify.com/console/get-recommendations/
-  // curl -X "GET" "https://api.spotify.com/v1/recommendations?limit=100&seed_tracks=3DoqcWI25FFABaTPknNBc0%2C4vF25KOYxToe7F7BK49Uoq%2C6VHBZt8T7ZdlUt3MkOZqPy%2C0FSxuVEj1lse3hvLtrItYN&min_danceability=0.47&min_energy=0.6&min_tempo=145" -H "Accept: application/json" -H "Content-Type: application/json" -H "Authorization: Bearer BQBMZTvRHuB-QYYCHSR6ZxrvyNuQUBH3na82bzeXIjKozCDjkybhOvOCtfDdT78eT3oHJFPqjAMN2hy6zjRu9zhK5iGi3TZ5BeYRagZVfxSYQhG-jO8_0Zr0hLJ6xM0fzVkvdbijdK3ewV1NDYX5fTFbFt5zuzpQjXHC65SJKIbEuK3lgEQ89imsZ48OsfptnBmFPS0C"
-      // let tracks = Source.getRecomTracks(
-
-      // );
+      
 
     if (firstRun == true)
     {
@@ -173,16 +189,24 @@ function genTrainingPlaylist(
       // referenceTracks.forEach((elem, i) => {
       //   obj[`id`] = elem}
       // )
+
+        var {min, max, median2} =  Utils.generateStatistics( referenceTracks );                             
     }
+    else
+    {
+        var {min, max, median2} =  Utils.generateStatistics( referenceTracks ); 
+    }
+
       tracks = Source.craftTracks(referenceTracks,
         {
           key: 'seed_tracks',
           query: {
               limit: 100, // по умолчанию и максимум 100
-              min_energy: minEnergy,
-              min_tempo: minTempo,
-              min_dancibility: minDanceability,
-              min_energy: minEnergy,
+              min_energy: min.energy,
+              min_tempo: min.tempo,
+              min_dancibility: min.danceability,
+              target_tempo: median2.tempo
+
               // target_popularity: 60,
           }
         }
@@ -217,10 +241,10 @@ function genTrainingPlaylist(
           key: 'seed_tracks',
           query: {
               limit: 100, // по умолчанию и максимум 100
-              min_energy: minEnergy,
-              min_tempo: minTempo,
-              min_dancibility: minDanceability,
-              min_energy: minEnergy,
+              min_energy: min.energy,
+              min_tempo: min.tempo,
+              min_dancibility: min.danceability,
+              target_tempo: median2.tempo
               // target_popularity: 60,
           }
         }
@@ -240,20 +264,29 @@ function genTrainingPlaylist(
     }
 
   Filter.dedupTracks(tracks);
+
+
+  // Remove tracks from HARD MISS list
+  Filter.removeTracks(tracks, hardMissTracks, false, 'every');  
   if (limitFinalPlaylistLength) {
     Selector.keepRandom(tracks, finalPlaylistLength);
   }
 
   // 3 - создаем плейлист
-  let hitRatio = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length + unexpectedBonus.length ) * 100).toFixed(2);
-  let unexpBonus = (unexpectedBonus.length / NoLikeTracks.length * 100).toFixed(2);
+  var hitRatio = unexpBonus = hardMissPrc = 0;
+  if (LikeTracks.length > 0) {
+    hitRatio    = (LikeTracks.length /  ( NoLikeTracks.length + LikeTracks.length + unexpectedBonus.length ) * 100).toFixed(2);
+    unexpBonus  = (unexpectedBonus.length / NoLikeTracks.length * 100).toFixed(2);
+    hardMissPrc = (hardMissTracks.length / NoLikeTracks.length * 100).toFixed(2);
+  }  
   Playlist.saveWithReplace({
       // id: 'вашеId',
       name: playlistName,
       tracks: tracks,
       public: makePublic,
       randomCover: 'once',
-      description: 'Stats: Likes from all time:' + LikeTracks.length + '. ' + 'No likes: ' + NoLikeTracks.length + '. Hitratio: '+ hitRatio + '%. Unxepected bonus: '+unexpBonus + '%',
+      description: 'Stats: Likes from all time:' + LikeTracks.length + '. ' + 'No likes: ' + NoLikeTracks.length + '. Hitratio: '+ hitRatio + '%. Unxepected bonus: '+unexpBonus + '%'+
+                   ' Hard miss: ' + hardMissPrc + '%.',
   });
 
   // 3.1 - backup playlist, would be required for further algorithm tweaking  
@@ -276,11 +309,11 @@ function genTrancePlaylist(){
                       secondChance             = true,
                       secondChancePerc         = 0.25,
                       makePublic               = true,
-                      minTempo                 = 145,
-                      minDancability           = 0.47,
-                      minEnergy                = 0.6,
-                      maxSpeechness            = 0.3,
-                      minValence               = 0.25,
+                      // minTempo                 = 145,
+                      // minDancability           = 0.47,
+                      // minEnergy                = 0.6,
+                      // maxSpeechness            = 0.3,
+                      // minValence               = 0.25,
                       maxLikesCache            = 150,
                       maxNoLikesCache          = 350
                      );
@@ -300,11 +333,11 @@ function genDNBPlaylist(){
                       secondChance             = true,
                       secondChancePerc         = 0.25,
                       makePublic               = true,
-                      minTempo                 = 165,
-                      minDancability           = 0.55,
-                      minEnergy                = 0.8,
-                      maxSpeechness            = 0.3,
-                      minValence               = 0.25,
+                      // minTempo                 = 165,
+                      // minDancability           = 0.55,
+                      // minEnergy                = 0.8,
+                      // maxSpeechness            = 0.3,
+                      // minValence               = 0.25,
                       maxLikesCache            = 150,
                       maxNoLikesCache          = 350
                      );
@@ -326,6 +359,15 @@ function genDNBPlaylist(){
 // }
 
 function testGenStats(){
-  Utils.generateStatistics( [{id:'2BkPRWKJiCHk1pcJBTDpvt'}, 
+  let {min, max, median2} =  Utils.generateStatistics( [{id:'2BkPRWKJiCHk1pcJBTDpvt'}, 
                              {id:'1A5qWui6qJvEdlJ3ZYO8yS'}] );                             
+  console.log(median2);
+}
+
+function testSplitByCriteria(){
+  let existingPlaylist = Source.getPlaylistTracks('Training playlist PSY-Trance');  
+  let {likedTracks, notLikedTracks, listened, unListened } = Filter.separateByCriteria(existingPlaylist, {byLikes: true, listened: true});
+  console.log('Total:' + existingPlaylist.length, '.Likes: '+ likedTracks.length, '. No likes:' + notLikedTracks.length 
+   + '. Listened: '+ listened.length + '. Unlistened: ' + unListened.length);
+  //);
 }
